@@ -115,6 +115,13 @@ options:
     required: false
     default: null
     choices: [ "reboot", "yearly", "annually", "monthly", "weekly", "daily", "hourly" ]
+  env:
+    description:
+      - If set, creates a job line on top of crontab without time fields. Used to specify enviroment variables.
+    version_added: "1.9"
+    required: false
+    default: "no"
+    choices: [ "yes", "no" ]
 requirements:
   - cron
 author: Dane Summers
@@ -132,6 +139,9 @@ EXAMPLES = '''
 
 # Creates an entry like "@reboot /some/job.sh"
 - cron: name="a job for reboot" special_time=reboot job="/some/job.sh"
+
+# Creates an entry like "PATH=/opt/bin"
+- cron: name="set PATH environment" env=yes job="PATH=/opt/bin"
 
 # Creates a cron file under /etc/cron.d
 - cron: name="yum autoupdate" weekday="2" minute=0 hour=12
@@ -245,12 +255,18 @@ class CronTab(object):
             if rc != 0:
                 self.module.fail_json(msg=err)
 
-    def add_job(self, name, job):
+    def add_job(self, name, job, prepend=False):
         # Add the comment
-        self.lines.append("%s%s" % (self.ansible, name))
+        comment = "%s%s" % (self.ansible, name)
 
         # Add the job
-        self.lines.append("%s" % (job))
+        job_line ="%s" % (job)
+        if prepend:
+            self.lines.insert(0, comment)
+            self.lines.insert(1, job_line)
+        else:
+            self.lines.append(comment)
+            self.lines.append(job_line)
 
     def update_job(self, name, job):
         return self._update_job(name, job, self.do_add_job)
@@ -289,7 +305,9 @@ class CronTab(object):
 
         return []
 
-    def get_cron_job(self,minute,hour,day,month,weekday,job,special):
+    def get_cron_job(self,minute,hour,day,month,weekday,job,special,env):
+        if env:
+            return "%s" % (job)
         if special:
             if self.cron_file:
                 return "@%s %s %s" % (special, self.user, job)
@@ -389,7 +407,12 @@ def main():
     # - name: no job
     #   cron: name="an old job" state=absent
     #
+    # - name: sets env
+    #   cron: name="Set PATH" env=yes job="PATH=/bin:/usr/bin"
+    #
     # Would produce:
+    # # Ansible: Set PATH
+    # PATH=/bin:/usr/bin
     # # Ansible: check dirs
     # * * 5,2 * * ls -alh > /dev/null
     # # Ansible: do the job
@@ -412,7 +435,8 @@ def main():
             special_time=dict(required=False,
                               default=None,
                               choices=["reboot", "yearly", "annually", "monthly", "weekly", "daily", "hourly"],
-                              type='str')
+                              type='str'),
+            env=dict(default=False, type='bool')
         ),
         supports_check_mode = False,
     )
@@ -430,6 +454,7 @@ def main():
     weekday      = module.params['weekday']
     reboot       = module.params['reboot']
     special_time = module.params['special_time']
+    env          = module.params['env']
     do_install   = state == 'present'
 
     changed      = False
@@ -445,16 +470,24 @@ def main():
 
     # --- user input validation ---
 
-    if (special_time or reboot) and \
+    if (special_time or reboot or env) and \
        (True in [(x != '*') for x in [minute, hour, day, month, weekday]]):
-        module.fail_json(msg="You must specify time and date fields or special time.")
+        module.fail_json(msg="You must specify time and date fields or special time or env.")
 
     if cron_file and do_install:
         if not user:
             module.fail_json(msg="To use cron_file=... parameter you must specify user=... as well")
 
-    if reboot and special_time:
-        module.fail_json(msg="reboot and special_time are mutually exclusive")
+    mutual=0
+    if reboot:
+        mutual=mutual+1
+    if special_time:
+        mutual=mutual+1
+    if env:
+        mutual=mutual+1
+
+    if mutual > 1:
+        module.fail_json(msg="reboot, special_time and env are mutually exclusive")
 
     if name is None and do_install:
         module.fail_json(msg="You must specify 'name' to install a new cron job")
@@ -466,10 +499,7 @@ def main():
         module.fail_json(msg="You must specify 'name' to remove a cron job")
 
     if reboot:
-        if special_time:
-            module.fail_json(msg="reboot and special_time are mutually exclusive")
-        else:
-            special_time = "reboot"
+        special_time = "reboot"
 
     # if requested make a backup before making a change
     if backup:
@@ -480,12 +510,13 @@ def main():
         changed = crontab.remove_job_file()
         module.exit_json(changed=changed,cron_file=cron_file,state=state)
 
-    job = crontab.get_cron_job(minute, hour, day, month, weekday, job, special_time)
+    job = crontab.get_cron_job(minute, hour, day, month, weekday, job, special_time, env)
+
     old_job = crontab.find_job(name)
 
     if do_install:
         if len(old_job) == 0:
-            crontab.add_job(name, job)
+            crontab.add_job(name, job, prepend=env)
             changed = True
         if len(old_job) > 0 and old_job[1] != job:
             crontab.update_job(name, job)
