@@ -105,6 +105,7 @@ OPTIONS = {'chdir': None,
            'creates': None,
            'executable': None,
            'NO_LOG': None,
+           'NO_SYSLOG': None,
            'removes': None,
            'warn': True,
            }

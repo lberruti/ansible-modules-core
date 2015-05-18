@@ -78,8 +78,9 @@ wrapped_module = sys.argv[3]
 argsfile = sys.argv[4]
 cmd = "%s %s" % (wrapped_module, argsfile)
 
-syslog.openlog('ansible-%s' % os.path.basename(__file__))
-syslog.syslog(syslog.LOG_NOTICE, 'Invoked with %s' % " ".join(sys.argv[1:]))
+if 'NO_SYSLOG' not in open(argsfile).read():
+    syslog.openlog('ansible-%s' % os.path.basename(__file__))
+    syslog.syslog(syslog.LOG_NOTICE, 'Invoked with %s' % " ".join(sys.argv[1:]))
 
 # setup logging directory
 logdir = os.path.expanduser("~/.ansible_async")
