@@ -33,11 +33,11 @@ import time
 import syslog
 
 
-syslog.openlog('ansible-%s' % os.path.basename(__file__))
-syslog.syslog(syslog.LOG_NOTICE, 'Invoked with %s' % " ".join(sys.argv[1:]))
+do_notice = True
 
 def notice(msg):
-    syslog.syslog(syslog.LOG_NOTICE, msg)
+    if do_notice:
+        syslog.syslog(syslog.LOG_NOTICE, msg)
 
 def daemonize_self():
     # daemonizing code: http://aspn.activestate.com/ASPN/Cookbook/Python/Recipe/66012
@@ -125,6 +125,12 @@ if __name__ == '__main__':
     argsfile = sys.argv[4]
     cmd = "%s %s" % (wrapped_module, argsfile)
     step = 5
+
+    if '_ansible_no_log' not in open(argsfile).read():
+        syslog.openlog('ansible-%s' % os.path.basename(__file__))
+    else:
+        do_notice = False
+    notice('Invoked with %s' % " ".join(sys.argv[1:]))
 
     # setup job output directory
     jobdir = os.path.expanduser("~/.ansible_async")
