@@ -20,6 +20,7 @@
 #
 # see examples/playbooks/uri.yml
 
+import cgi
 import shutil
 import tempfile
 import base64
@@ -125,6 +126,15 @@ options:
     description:
       - all arguments accepted by the M(file) module also work here
     required: false
+  validate_certs:
+    description:
+      - If C(no), SSL certificates will not be validated.  This should only
+        set to C(no) used on personally controlled sites using self-signed
+        certificates.  Prior to 1.9.2 the code defaulted to C(no).
+    required: false
+    default: 'yes'
+    choices: ['yes', 'no']
+    version_added: '1.9.2'
 
 # informational: requirements for nodes
 requirements: [ urlparse, httplib2 ]
@@ -160,7 +170,7 @@ EXAMPLES = '''
 
 - uri: url=https://your.form.based.auth.example.com/dashboard.php
        method=GET return_content=yes HEADER_Cookie="{{login.set_cookie}}"
-            
+
 # Queue build of a project in Jenkins:
 
 - uri: url=http://{{jenkins.host}}/job/{{jenkins.job}}/build?token={{jenkins.token}} 
@@ -181,7 +191,6 @@ try:
     import socket
 except ImportError:
     HAS_URLPARSE = False
-
 
 def write_file(module, url, dest, content):
     # create a tempfile with some test content
@@ -238,7 +247,7 @@ def url_filename(url):
     return fn
 
 
-def uri(module, url, dest, user, password, body, method, headers, redirects, socket_timeout):
+def uri(module, url, dest, user, password, body, method, headers, redirects, socket_timeout, validate_certs):
     # To debug
     #httplib2.debug = 4
 
@@ -254,7 +263,8 @@ def uri(module, url, dest, user, password, body, method, headers, redirects, soc
         follow_all_redirects = False
 
     # Create a Http object and set some default options.
-    h = httplib2.Http(disable_ssl_certificate_validation=True, timeout=socket_timeout)
+    disable_validation = not validate_certs
+    h = httplib2.Http(disable_ssl_certificate_validation=disable_validation, timeout=socket_timeout)
     h.follow_all_redirects = follow_all_redirects
     h.follow_redirects = follow_redirects
     h.forward_authorization_headers = True
@@ -303,10 +313,7 @@ def uri(module, url, dest, user, password, body, method, headers, redirects, soc
         r['redirected'] = redirected
         r.update(resp_redir)
         r.update(resp)
-        try:
-            return r, unicode(content.decode('raw_unicode_escape')), dest
-        except:
-            return r, content, dest
+        return r, content, dest
     except httplib2.RedirectMissingLocation:
         module.fail_json(msg="A 3xx redirect response code was provided but no Location: header was provided to point to the new location.")
     except httplib2.RedirectLimit:
@@ -323,6 +330,10 @@ def uri(module, url, dest, user, password, body, method, headers, redirects, soc
         module.fail_json(msg="The server requested a type of HMACDigest authentication that we are unfamiliar with.")
     except httplib2.UnimplementedHmacDigestAuthOptionError:
         module.fail_json(msg="The server requested a type of HMACDigest authentication that we are unfamiliar with.")
+    except httplib2.CertificateHostnameMismatch:
+        module.fail_json(msg="The server's certificate does not match with its hostname.")
+    except httplib2.SSLHandshakeError:
+        module.fail_json(msg="Unable to validate server's certificate against available CA certs.")
     except socket.error, e:
         module.fail_json(msg="Socket error: %s to %s" % (e, url))
 
@@ -343,6 +354,7 @@ def main():
             removes = dict(required=False, default=None),
             status_code = dict(required=False, default=[200], type='list'),
             timeout = dict(required=False, default=30, type='int'),
+            validate_certs = dict(required=False, default=True, type='bool'),
         ),
         check_invalid_arguments=False,
         add_file_common_args=True
@@ -366,6 +378,7 @@ def main():
     removes = module.params['removes']
     status_code = [int(x) for x in list(module.params['status_code'])]
     socket_timeout = module.params['timeout']
+    validate_certs = module.params['validate_certs']
 
     # Grab all the http headers. Need this hack since passing multi-values is currently a bit ugly. (e.g. headers='{"Content-Type":"application/json"}')
     dict_headers = {}
@@ -400,7 +413,7 @@ def main():
 
 
     # Make the request
-    resp, content, dest = uri(module, url, dest, user, password, body, method, dict_headers, redirects, socket_timeout)
+    resp, content, dest = uri(module, url, dest, user, password, body, method, dict_headers, redirects, socket_timeout, validate_certs)
     resp['status'] = int(resp['status'])
 
     # Write the file out if requested
@@ -425,22 +438,32 @@ def main():
         ukey = key.replace("-", "_")  
         uresp[ukey] = value
 
+    # Default content_encoding to try
+    content_encoding = 'utf-8'
     if 'content_type' in uresp:
-        if uresp['content_type'].startswith('application/json') or \
-                uresp['content_type'].startswith('text/json'):
+        content_type, params = cgi.parse_header(uresp['content_type'])
+        if 'charset' in params:
+            content_encoding = params['charset']
+        u_content = unicode(content, content_encoding, errors='xmlcharrefreplace')
+        if content_type.startswith('application/json') or \
+                content_type.startswith('text/json'):
             try:
-                js = json.loads(content)
+                js = json.loads(u_content)
                 uresp['json'] = js
             except:
                 pass
+    else:
+        u_content = unicode(content, content_encoding, errors='xmlcharrefreplace')
+
     if resp['status'] not in status_code:
-        module.fail_json(msg="Status code was not " + str(status_code), content=content, **uresp)
+        module.fail_json(msg="Status code was not " + str(status_code), content=u_content, **uresp)
     elif return_content:
-        module.exit_json(changed=changed, content=content, **uresp)
+        module.exit_json(changed=changed, content=u_content, **uresp)
     else:
         module.exit_json(changed=changed, **uresp)
 
 
 # import module snippets
 from ansible.module_utils.basic import *
-main()
+if __name__ == '__main__':
+    main()
