@@ -44,7 +44,6 @@ options:
       - HTTP or HTTPS URL in the form (http|https)://host.domain[:port]/path
     required: true
     default: null
-    aliases: []
   dest:
     description:
       - path of where to download the file to (if desired). If I(dest) is a directory, the basename of the file on the remote server will be used.
@@ -67,7 +66,7 @@ options:
     default: null
   method:
     description:
-      - The HTTP method of the request or response.
+      - The HTTP method of the request or response. It MUST be uppercase.
     required: false
     choices: [ "GET", "POST", "PUT", "HEAD", "DELETE", "OPTIONS", "PATCH" ]
     default: "GET"
@@ -444,7 +443,7 @@ def main():
         content_type, params = cgi.parse_header(uresp['content_type'])
         if 'charset' in params:
             content_encoding = params['charset']
-        u_content = unicode(content, content_encoding, errors='xmlcharrefreplace')
+        u_content = unicode(content, content_encoding, errors='replace')
         if content_type.startswith('application/json') or \
                 content_type.startswith('text/json'):
             try:
@@ -453,7 +452,7 @@ def main():
             except:
                 pass
     else:
-        u_content = unicode(content, content_encoding, errors='xmlcharrefreplace')
+        u_content = unicode(content, content_encoding, errors='replace')
 
     if resp['status'] not in status_code:
         module.fail_json(msg="Status code was not " + str(status_code), content=u_content, **uresp)
