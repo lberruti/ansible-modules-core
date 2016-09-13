@@ -155,6 +155,8 @@ def do_ini(module, filename, section=None, option=None, value=None, state='prese
             if within_section:
                 if state == 'present':
                     # insert missing option line at the end of the section
+                    while not ini_lines[index-1].strip(): # blank line
+                        index -= 1
                     ini_lines.insert(index, assignment_format % (option, value))
                     changed = True
                 elif state == 'absent' and not option:
