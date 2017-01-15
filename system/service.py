@@ -74,6 +74,12 @@ options:
         description:
         - Additional arguments provided on the command line
         aliases: [ 'args' ]
+    use:
+        description:
+            - The service module actually uses system specific modules, normally through auto detection, this setting can force a specific module.
+            - Normally it uses the value of the 'ansible_service_mgr' fact and falls back to the old 'service' module when none matching is found.
+        default: 'auto'
+        version_added: 2.2
 '''
 
 EXAMPLES = '''
@@ -596,11 +602,9 @@ class LinuxService(Service):
             cleanout = status_stdout.lower().replace(self.name.lower(), '')
             if "stop" in cleanout:
                 self.running = False
-            elif "run" in cleanout and "not" in cleanout:
-                self.running = False
-            elif "run" in cleanout and "not" not in cleanout:
-                self.running = True
-            elif "start" in cleanout and "not" not in cleanout:
+            elif "run" in cleanout:
+                self.running = not ("not " in cleanout)
+            elif "start" in cleanout and "not " not in cleanout:
                 self.running = True
             elif 'could not access pid file' in cleanout:
                 self.running = False

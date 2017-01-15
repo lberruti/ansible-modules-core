@@ -366,16 +366,26 @@ def remount(module, mount_bin, args):
 
     cmd += _set_fstab_args(args)
     cmd += [ args['name'], ]
+    out = err = ''
     try:
-        rc, out, err = module.run_command(cmd)
+        if get_platform().lower().endswith('bsd'):
+            # Note: Forcing BSDs to do umount/mount due to BSD remount not
+            # working as expected (suspect bug in the BSD mount command)
+            # Interested contributor could rework this to use mount options on
+            # the CLI instead of relying on fstab
+            # https://github.com/ansible/ansible-modules-core/issues/5591
+            rc = 1
+        else:
+            rc, out, err = module.run_command(cmd)
     except:
         rc = 1
+
     if rc != 0:
-        msg = out+err
+        msg = out + err
         if ismount(args['name']):
             rc, msg = umount(module, args['name'])
         if rc == 0:
-            rc,msg = mount(module, args)
+            rc, msg = mount(module, args)
     return rc, msg
 
 # Note if we wanted to put this into module_utils we'd have to get permission
@@ -398,7 +408,7 @@ def is_bind_mounted(module, linux_mounts, dest, src=None, fstype=None):
 
     is_mounted = False
 
-    if get_platform() == 'Linux':
+    if get_platform() == 'Linux' and linux_mounts is not None:
         if src is None:
             # That's for unmounted/absent
             if dest in linux_mounts:
@@ -439,7 +449,7 @@ def get_linux_mounts(module):
     try:
         f = open(mntinfo_file)
     except IOError:
-        module.fail_json(msg="Cannot open file %s" % mntinfo_file)
+        return
 
     lines = map(str.strip, f.readlines())
 
@@ -603,6 +613,11 @@ def main():
     # call is_bind_mouted() multiple times
     if get_platform() == 'Linux':
         linux_mounts = get_linux_mounts(module)
+
+        if linux_mounts is None:
+            args['warnings'] = (
+                'Cannot open file /proc/self/mountinfo. '
+                'Bind mounts might be misinterpreted.')
 
     # Override defaults with user specified params
     for key in ('src', 'fstype', 'passno', 'opts', 'dump', 'fstab'):
